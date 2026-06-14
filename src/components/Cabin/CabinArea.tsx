@@ -1,6 +1,7 @@
 import React from 'react';
 import { useDiceStore } from '../../store/useDiceStore';
 import { useShipStore } from '../../store/useShipStore';
+import { useGameStore } from '../../store/useGameStore';
 import { CabinSlot } from './CabinSlot';
 import type { CabinType } from '../../types';
 
@@ -11,6 +12,7 @@ interface CabinAreaProps {
 export const CabinArea: React.FC<CabinAreaProps> = ({ disabled }) => {
   const { dice, assignDie } = useDiceStore();
   const { ship } = useShipStore();
+  const { battleState } = useGameStore();
 
   const handleDrop = (cabinType: CabinType, dieId: string) => {
     assignDie(dieId, cabinType);
@@ -28,7 +30,16 @@ export const CabinArea: React.FC<CabinAreaProps> = ({ disabled }) => {
     return getDiceForCabin(cabinType).reduce((sum, d) => sum + d.value, 0);
   };
 
+  const getTargetPartName = (): string | null => {
+    if (!battleState || !battleState.targetPartId || !battleState.enemy.parts) {
+      return null;
+    }
+    const part = battleState.enemy.parts.find(p => p.id === battleState.targetPartId);
+    return part ? part.name : null;
+  };
+
   const cabinOrder: CabinType[] = ['engine', 'shield', 'weapon', 'repair', 'scanner'];
+  const targetPartName = getTargetPartName();
 
   return (
     <div className="glass-panel neon-border p-6 rounded-xl">
@@ -48,6 +59,7 @@ export const CabinArea: React.FC<CabinAreaProps> = ({ disabled }) => {
               onDrop={handleDrop}
               onRemoveDie={handleRemoveDie}
               disabled={disabled}
+              targetPartName={targetPartName}
             />
           );
         })}

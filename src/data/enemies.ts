@@ -1,4 +1,16 @@
-import type { Enemy, EnemyIntent } from '../types';
+import type { Enemy, EnemyIntent, EnemyPart, EnemyPartType } from '../types';
+
+interface EnemyPartTemplate {
+  type: EnemyPartType;
+  name: string;
+  icon: string;
+  hp: number;
+  armor: number;
+  isExposed: boolean;
+  isWeakPoint: boolean;
+  description: string;
+  effectDescription: string;
+}
 
 interface EnemyTemplate {
   id: string;
@@ -20,6 +32,106 @@ interface EnemyTemplate {
     effect?: string;
   }>;
   intentWeights: Record<string, number>;
+  parts: EnemyPartTemplate[];
+  hasParts: boolean;
+}
+
+const commonPartTemplates: Record<EnemyPartType, Omit<EnemyPartTemplate, 'hp' | 'armor'>> = {
+  weapon_array: {
+    type: 'weapon_array',
+    name: '武器阵列',
+    icon: '⚔️',
+    isExposed: true,
+    isWeakPoint: false,
+    description: '主武器系统，集中了所有火力输出',
+    effectDescription: '破坏后敌方攻击力大幅降低',
+  },
+  shield_generator: {
+    type: 'shield_generator',
+    name: '护盾发生器',
+    icon: '🛡️',
+    isExposed: false,
+    isWeakPoint: true,
+    description: '产生和维持护盾的核心设备',
+    effectDescription: '破坏后护盾恢复效率降低',
+  },
+  thruster: {
+    type: 'thruster',
+    name: '推进器',
+    icon: '🚀',
+    isExposed: true,
+    isWeakPoint: false,
+    description: '舰船机动推进系统',
+    effectDescription: '破坏后敌方闪避率大幅降低',
+  },
+  repair_core: {
+    type: 'repair_core',
+    name: '维修核心',
+    icon: '🔧',
+    isExposed: false,
+    isWeakPoint: true,
+    description: '纳米机器人维修核心',
+    effectDescription: '破坏后敌方无法有效维修',
+  },
+  command_bridge: {
+    type: 'command_bridge',
+    name: '指挥桥',
+    icon: '🎯',
+    isExposed: false,
+    isWeakPoint: true,
+    description: '舰船指挥和控制系统',
+    effectDescription: '破坏后敌方意图混乱，可能执行错误行动',
+  },
+};
+
+function createEnemyParts(
+  enemyType: string,
+  baseHp: number
+): EnemyPart[] {
+  const partsMap: Record<string, Array<{ type: EnemyPartType; hpRatio: number; armor: number }>> = {
+    cruiser: [
+      { type: 'weapon_array', hpRatio: 0.3, armor: 0.2 },
+      { type: 'shield_generator', hpRatio: 0.25, armor: 0.3 },
+      { type: 'thruster', hpRatio: 0.2, armor: 0.1 },
+      { type: 'command_bridge', hpRatio: 0.35, armor: 0.4 },
+    ],
+    raider: [
+      { type: 'weapon_array', hpRatio: 0.25, armor: 0.1 },
+      { type: 'thruster', hpRatio: 0.3, armor: 0.1 },
+      { type: 'command_bridge', hpRatio: 0.25, armor: 0.2 },
+    ],
+    boss: [
+      { type: 'weapon_array', hpRatio: 0.3, armor: 0.3 },
+      { type: 'shield_generator', hpRatio: 0.3, armor: 0.4 },
+      { type: 'thruster', hpRatio: 0.25, armor: 0.2 },
+      { type: 'repair_core', hpRatio: 0.3, armor: 0.3 },
+      { type: 'command_bridge', hpRatio: 0.4, armor: 0.5 },
+    ],
+  };
+
+  const partsConfig = partsMap[enemyType] || [];
+  const timestamp = Date.now();
+
+  return partsConfig.map((config, index) => {
+    const template = commonPartTemplates[config.type];
+    const partHp = Math.max(5, Math.floor(baseHp * config.hpRatio));
+
+    return {
+      id: `part_${timestamp}_${index}`,
+      type: config.type,
+      name: template.name,
+      icon: template.icon,
+      hp: partHp,
+      maxHp: partHp,
+      armor: config.armor,
+      isExposed: template.isExposed,
+      isScanned: false,
+      isWeakPoint: template.isWeakPoint,
+      destroyed: false,
+      description: template.description,
+      effectDescription: template.effectDescription,
+    };
+  });
 }
 
 export const enemyTemplates: EnemyTemplate[] = [
@@ -40,6 +152,8 @@ export const enemyTemplates: EnemyTemplate[] = [
       defend: 0.2,
       charge: 0.1,
     },
+    parts: [],
+    hasParts: false,
   },
   {
     id: 'fighter',
@@ -67,6 +181,8 @@ export const enemyTemplates: EnemyTemplate[] = [
       charge: 0.15,
       special: 0.15,
     },
+    parts: [],
+    hasParts: false,
   },
   {
     id: 'cruiser',
@@ -77,7 +193,7 @@ export const enemyTemplates: EnemyTemplate[] = [
     attack: 18,
     defense: 0.2,
     evasion: 0.05,
-    description: '装甲厚重的主力战舰，火力强大',
+    description: '装甲厚重的主力战舰，火力强大。可攻击其武器阵列、推进器等部位。',
     sprite: '🛳️',
     abilities: [
       {
@@ -102,6 +218,8 @@ export const enemyTemplates: EnemyTemplate[] = [
       special: 0.1,
       repair: 0.05,
     },
+    parts: [],
+    hasParts: true,
   },
   {
     id: 'pirate_raider',
@@ -112,7 +230,7 @@ export const enemyTemplates: EnemyTemplate[] = [
     attack: 15,
     defense: 0.05,
     evasion: 0.25,
-    description: '神出鬼没的海盗船，擅长暴击',
+    description: '神出鬼没的海盗船，擅长暴击。攻击推进器可降低其闪避。',
     sprite: '🏴‍☠️',
     abilities: [
       {
@@ -129,6 +247,8 @@ export const enemyTemplates: EnemyTemplate[] = [
       charge: 0.25,
       special: 0.15,
     },
+    parts: [],
+    hasParts: true,
   },
   {
     id: 'alien_mothership',
@@ -139,7 +259,7 @@ export const enemyTemplates: EnemyTemplate[] = [
     attack: 25,
     defense: 0.3,
     evasion: 0.1,
-    description: '来自深空的神秘战舰，拥有未知的科技',
+    description: '来自深空的神秘战舰，拥有未知的科技。破坏各部位可显著削弱其战斗力。',
     sprite: '👾',
     abilities: [
       {
@@ -172,12 +292,14 @@ export const enemyTemplates: EnemyTemplate[] = [
       special: 0.2,
       repair: 0.1,
     },
+    parts: [],
+    hasParts: true,
   },
 ];
 
 export function createEnemy(templateId: string): Enemy {
   const template = enemyTemplates.find(t => t.id === templateId) || enemyTemplates[0];
-  
+
   const enemy: Enemy = {
     id: `${template.id}_${Date.now()}`,
     name: template.name,
@@ -201,8 +323,12 @@ export function createEnemy(templateId: string): Enemy {
       ...a,
       currentCooldown: 0,
     })),
+    parts: template.hasParts ? createEnemyParts(template.type, template.hp) : [],
+    baseAttack: template.attack,
+    baseEvasion: template.evasion,
+    isIntentDisrupted: false,
   };
-  
+
   return generateEnemyIntent(enemy, template.intentWeights);
 }
 
@@ -216,33 +342,39 @@ export function generateEnemyIntent(
     charge: 0.15,
     special: 0.1,
   };
-  
+
   const useWeights = weights || defaultWeights;
   const totalWeight = Object.values(useWeights).reduce((sum, w) => sum + w, 0);
-  
+
   let random = Math.random() * totalWeight;
   let selectedType = 'attack';
-  
-  for (const [type, weight] of Object.entries(useWeights)) {
-    random -= weight;
-    if (random <= 0) {
-      selectedType = type;
-      break;
+
+  if (enemy.isIntentDisrupted) {
+    random = Math.random() * totalWeight;
+    const allTypes = Object.keys(useWeights);
+    selectedType = allTypes[Math.floor(Math.random() * allTypes.length)];
+  } else {
+    for (const [type, weight] of Object.entries(useWeights)) {
+      random -= weight;
+      if (random <= 0) {
+        selectedType = type;
+        break;
+      }
     }
   }
-  
+
   let availableSpecial = enemy.abilities.filter(a => a.currentCooldown === 0);
   if (selectedType === 'special' && availableSpecial.length === 0) {
     selectedType = 'attack';
   }
-  
+
   const hpPercent = enemy.hp / enemy.maxHp;
-  if (hpPercent < 0.3 && Math.random() < 0.3) {
+  if (hpPercent < 0.3 && Math.random() < 0.3 && !enemy.isIntentDisrupted) {
     selectedType = 'defend';
   }
-  
+
   let forcedSpecial: typeof availableSpecial[0] | undefined;
-  
+
   if (enemy.shield < enemy.maxShield * 0.2 && Math.random() < 0.2) {
     const repairAbility = enemy.abilities.find(a => a.effect === 'heal_shield' && a.currentCooldown === 0);
     if (repairAbility) {
@@ -250,7 +382,7 @@ export function generateEnemyIntent(
       forcedSpecial = repairAbility;
     }
   }
-  
+
   if (hpPercent < 0.25 && !forcedSpecial && Math.random() < 0.25) {
     const healAbility = enemy.abilities.find(a => a.effect === 'heal_hp' && a.currentCooldown === 0);
     if (healAbility) {
@@ -258,15 +390,15 @@ export function generateEnemyIntent(
       forcedSpecial = healAbility;
     }
   }
-  
+
   availableSpecial = enemy.abilities.filter(a => a.currentCooldown === 0);
   if (selectedType === 'special' && availableSpecial.length === 0) {
     selectedType = 'attack';
     forcedSpecial = undefined;
   }
-  
+
   let intent: EnemyIntent;
-  
+
   switch (selectedType) {
     case 'attack':
       intent = {
@@ -317,7 +449,7 @@ export function generateEnemyIntent(
         icon: '⚔️',
       };
   }
-  
+
   return {
     ...enemy,
     intent,
@@ -331,16 +463,36 @@ export function getRandomEnemy(difficulty: number = 1): Enemy {
     if (difficulty <= 3) return ['fighter', 'pirate_raider', 'cruiser'].includes(e.id);
     return true;
   });
-  
+
   const template = availableEnemies[Math.floor(Math.random() * availableEnemies.length)];
   const enemy = createEnemy(template.id);
-  
+
   const difficultyMultiplier = 1 + (difficulty - 1) * 0.2;
   enemy.hp = Math.floor(enemy.hp * difficultyMultiplier);
   enemy.maxHp = enemy.hp;
   enemy.shield = Math.floor(enemy.shield * difficultyMultiplier);
   enemy.maxShield = enemy.shield;
   enemy.attack = Math.floor(enemy.attack * difficultyMultiplier);
-  
+  enemy.baseAttack = enemy.attack;
+
+  enemy.parts = enemy.parts.map(part => {
+    const scaledHp = Math.floor(part.maxHp * difficultyMultiplier);
+    return {
+      ...part,
+      hp: scaledHp,
+      maxHp: scaledHp,
+    };
+  });
+
   return enemy;
+}
+
+export function scanEnemyParts(enemy: Enemy): Enemy {
+  return {
+    ...enemy,
+    parts: enemy.parts.map(part => ({
+      ...part,
+      isScanned: true,
+    })),
+  };
 }

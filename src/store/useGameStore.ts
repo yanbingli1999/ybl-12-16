@@ -38,6 +38,7 @@ interface GameState {
   setReplaySpeed: (speed: number) => void;
   setDifficulty: (difficulty: number) => void;
   resetBattle: () => void;
+  setTargetPart: (partId: string | null) => void;
 }
 
 export const useGameStore = create<GameState>((set, get) => ({
@@ -80,6 +81,7 @@ export const useGameStore = create<GameState>((set, get) => ({
       result: 'ongoing',
       startTime: Date.now(),
       rewardPoints: 0,
+      targetPartId: null,
     };
     
     const replayData: ReplayData = {
@@ -95,6 +97,18 @@ export const useGameStore = create<GameState>((set, get) => ({
     });
     
     useDiceStore.getState().resetDice();
+  },
+  
+  setTargetPart: (partId: string | null) => {
+    const { battleState } = get();
+    if (!battleState) return;
+    
+    set({
+      battleState: {
+        ...battleState,
+        targetPartId: partId,
+      },
+    });
   },
   
   confirmTurn: () => {
@@ -118,7 +132,8 @@ export const useGameStore = create<GameState>((set, get) => ({
       dice,
       battleState.player,
       preparedEnemy,
-      config
+      config,
+      battleState.targetPartId
     );
     
     let newState: BattleState = {
@@ -137,7 +152,8 @@ export const useGameStore = create<GameState>((set, get) => ({
     newState.phase = 'enemy';
     
     if (newState.enemy.intent.type === 'repair') {
-      const healAmount = newState.enemy.intent.value;
+      const healPenalty = (newState.enemy as any).healPenalty || 0;
+      const healAmount = Math.floor(newState.enemy.intent.value * (1 - healPenalty));
       newState.enemy = {
         ...newState.enemy,
         hp: Math.min(newState.enemy.maxHp, newState.enemy.hp + healAmount),
@@ -197,7 +213,9 @@ export const useGameStore = create<GameState>((set, get) => ({
     }
     
     if (enemyResult.effect === 'heal_hp') {
-      const healAmount = Math.floor(newState.enemy.maxHp * 0.15);
+      const healPenalty = (newState.enemy as any).healPenalty || 0;
+      const baseHeal = Math.floor(newState.enemy.maxHp * 0.15);
+      const healAmount = Math.floor(baseHeal * (1 - healPenalty));
       newState.enemy = {
         ...newState.enemy,
         hp: Math.min(newState.enemy.maxHp, newState.enemy.hp + healAmount),
@@ -213,8 +231,25 @@ export const useGameStore = create<GameState>((set, get) => ({
       });
     }
     
-    if (enemyResult.effect === 'heal_shield') {
-      const shieldAmount = Math.floor(newState.enemy.maxShield * 0.3);
+    if (enemyResult.shieldAmount) {
+      const shieldAmount = enemyResult.shieldAmount;
+      newState.enemy = {
+        ...newState.enemy,
+        shield: Math.min(newState.enemy.maxShield, newState.enemy.shield + shieldAmount),
+      };
+      enemyResult.logs.push({
+        id: `log_${Date.now()}_shield`,
+        turn: battleState.turn,
+        type: 'shield',
+        source: 'enemy',
+        message: `敌方恢复 ${shieldAmount} 护盾`,
+        value: shieldAmount,
+        timestamp: Date.now(),
+      });
+    } else if (enemyResult.effect === 'heal_shield') {
+      const shieldPenalty = (newState.enemy as any).shieldPenalty || 0;
+      const baseShieldAmount = Math.floor(newState.enemy.maxShield * 0.3);
+      const shieldAmount = Math.floor(baseShieldAmount * (1 - shieldPenalty));
       newState.enemy = {
         ...newState.enemy,
         shield: Math.min(newState.enemy.maxShield, newState.enemy.shield + shieldAmount),
@@ -251,10 +286,6 @@ export const useGameStore = create<GameState>((set, get) => ({
         defense: originalDefense,
       };
     }
-
-    // #region debug-point H4:defense-rollback
-    fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"battle-mechanics-bugs",runId:"pre-fix",hypothesisId:"H4",location:"useGameStore.ts:259",msg:"[DEBUG] Defense rollback",data:{wasDefending,defenseBeforeRollback:newState.enemy.defense,defenseAfterRollback:wasDefending?originalDefense:newState.enemy.defense,originalDefense,nextIntentWillBeGenerated:true},ts:Date.now()})}).catch(()=>{});
-    // #endregion
     
     newState.enemy = generateEnemyIntent(newState.enemy);
     
@@ -272,11 +303,16 @@ export const useGameStore = create<GameState>((set, get) => ({
       energy: Math.min(newState.player.maxEnergy, newState.player.energy + Math.floor(newState.player.maxEnergy * 0.5)),
     };
     
+    newState.targetPartId = null;
+    
     const replayAction: ReplayAction = {
       turn: battleState.turn,
       phase: 'player',
       action: 'turn',
-      payload: { dice: JSON.parse(JSON.stringify(dice)) },
+      payload: { 
+        dice: JSON.parse(JSON.stringify(dice)),
+        targetPartId: battleState.targetPartId 
+      },
       resultingState: JSON.parse(JSON.stringify(newState)),
     };
     
@@ -313,8 +349,9 @@ export const useGameStore = create<GameState>((set, get) => ({
     const shipStore = useShipStore.getState();
     const config = useConfigStore.getState().config;
     
+    const partsDestroyed = battleState.enemy.parts.filter(p => p.destroyed).length;
     const reward = result === 'victory' 
-      ? calculateReward(result, battleState.turn, get().currentDifficulty)
+      ? calculateReward(result, battleState.turn, get().currentDifficulty, partsDestroyed)
       : 0;
     
     const newState: BattleState = {

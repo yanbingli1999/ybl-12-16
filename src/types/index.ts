@@ -1,5 +1,23 @@
 export type CabinType = 'engine' | 'shield' | 'weapon' | 'repair' | 'scanner';
 
+export type EnemyPartType = 'weapon_array' | 'shield_generator' | 'thruster' | 'repair_core' | 'command_bridge';
+
+export interface EnemyPart {
+  id: string;
+  type: EnemyPartType;
+  name: string;
+  icon: string;
+  hp: number;
+  maxHp: number;
+  armor: number;
+  isExposed: boolean;
+  isScanned: boolean;
+  isWeakPoint: boolean;
+  destroyed: boolean;
+  description: string;
+  effectDescription: string;
+}
+
 export interface Die {
   id: string;
   value: number;
@@ -70,6 +88,10 @@ export interface Enemy {
   abilities: EnemyAbility[];
   description: string;
   sprite: string;
+  parts: EnemyPart[];
+  baseAttack: number;
+  baseEvasion: number;
+  isIntentDisrupted: boolean;
 }
 
 export type BattleLogType = 'damage' | 'heal' | 'shield' | 'effect' | 'system' | 'crit' | 'miss';
@@ -99,6 +121,7 @@ export interface BattleState {
   startTime: number;
   endTime?: number;
   rewardPoints: number;
+  targetPartId: string | null;
 }
 
 export interface GameConfig {
@@ -113,6 +136,14 @@ export interface GameConfig {
   maxRerolls: number;
   diceCount: number;
   enemyDamageVariance: number;
+  partArmorDamageReduction: number;
+  weaponArrayAttackReduction: number;
+  thrusterEvasionReduction: number;
+  shieldGeneratorShieldPenalty: number;
+  repairCoreHealReduction: number;
+  commandBridgeDisruptChance: number;
+  exposedPartDamageBonus: number;
+  weakPointCritBonus: number;
 }
 
 export interface Upgrade {

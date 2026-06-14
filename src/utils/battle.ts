@@ -1,7 +1,16 @@
 import type { 
   Ship, Enemy, Die, CabinType, DamageResult, BattleLogEntry,
-  GameConfig, AllocationResult, EnemyIntent
+  GameConfig, AllocationResult, EnemyIntent, EnemyPart
 } from '../types';
+
+export interface PartDamageResult {
+  partId: string;
+  damage: number;
+  wasDestroyed: boolean;
+  armorAbsorbed: number;
+  exposedBonus: boolean;
+  weakPointBonus: boolean;
+}
 
 export function calculateDamage(
   baseDamage: number,
@@ -63,6 +72,84 @@ export function applyShieldAbsorption(
     shieldAbsorbed: Math.floor(absorptionAmount),
     remainingShield: Math.max(0, remainingShield),
   };
+}
+
+export function calculatePartDamage(
+  baseDamage: number,
+  part: EnemyPart,
+  config: GameConfig,
+  isCrit: boolean
+): PartDamageResult {
+  let damage = baseDamage;
+  let exposedBonus = false;
+  let weakPointBonus = false;
+
+  if (part.isExposed) {
+    exposedBonus = true;
+    damage *= (1 + config.exposedPartDamageBonus);
+  }
+
+  if (part.isWeakPoint && isCrit) {
+    weakPointBonus = true;
+    damage *= (1 + config.weakPointCritBonus);
+  }
+
+  const armorAbsorbed = Math.floor(damage * part.armor);
+  damage = Math.max(1, damage - armorAbsorbed);
+  damage = Math.floor(damage);
+
+  const wasDestroyed = damage >= part.hp;
+
+  return {
+    partId: part.id,
+    damage,
+    wasDestroyed,
+    armorAbsorbed,
+    exposedBonus,
+    weakPointBonus,
+  };
+}
+
+export function applyPartEffects(enemy: Enemy, config: GameConfig): Enemy {
+  let updatedEnemy = { ...enemy };
+  let attackMultiplier = 1;
+  let evasionMultiplier = 1;
+  let isIntentDisrupted = false;
+  let shieldPenalty = 0;
+  let healPenalty = 0;
+
+  for (const part of enemy.parts) {
+    if (part.destroyed) {
+      switch (part.type) {
+        case 'weapon_array':
+          attackMultiplier *= (1 - config.weaponArrayAttackReduction);
+          break;
+        case 'thruster':
+          evasionMultiplier *= (1 - config.thrusterEvasionReduction);
+          break;
+        case 'shield_generator':
+          shieldPenalty += config.shieldGeneratorShieldPenalty;
+          break;
+        case 'repair_core':
+          healPenalty += config.repairCoreHealReduction;
+          break;
+        case 'command_bridge':
+          if (Math.random() < config.commandBridgeDisruptChance) {
+            isIntentDisrupted = true;
+          }
+          break;
+      }
+    }
+  }
+
+  updatedEnemy.attack = Math.max(1, Math.floor(updatedEnemy.baseAttack * attackMultiplier));
+  updatedEnemy.evasion = Math.max(0, updatedEnemy.baseEvasion * evasionMultiplier);
+  updatedEnemy.isIntentDisrupted = isIntentDisrupted;
+
+  (updatedEnemy as any).shieldPenalty = shieldPenalty;
+  (updatedEnemy as any).healPenalty = healPenalty;
+
+  return updatedEnemy;
 }
 
 export function calculateCabinEffect(
@@ -128,8 +215,14 @@ export function calculateCabinEffect(
     }
     case 'scanner': {
       const evasionReduction = effectivePoints * config.scanEvasionReduction * levelMultiplier;
+      const scanBonus = effectivePoints >= 5;
+      const effectText = isOverheated 
+        ? '扫描舱过热！无法扫描' 
+        : scanBonus 
+          ? `深度扫描！标记所有薄弱部位，敌方闪避 -${(evasionReduction * 100).toFixed(0)}%`
+          : `扫描完成，敌方闪避 -${(evasionReduction * 100).toFixed(0)}%`;
       result = {
-        effect: isOverheated ? '扫描舱过热！无法扫描' : `扫描完成，敌方闪避 -${(evasionReduction * 100).toFixed(0)}%`,
+        effect: effectText,
         value: evasionReduction,
         type: 'effect',
       };
@@ -180,6 +273,8 @@ export function executeEnemyIntent(
   newPlayerHp: number;
   newPlayerShield: number;
   effect?: string;
+  healAmount?: number;
+  shieldAmount?: number;
 } {
   const logs: BattleLogEntry[] = [];
   const intent = enemy.intent;
@@ -187,6 +282,11 @@ export function executeEnemyIntent(
   let baseDamage = 0;
   let guaranteedCrit = false;
   let specialEffect: string | undefined;
+  let healAmount: number | undefined;
+  let shieldAmount: number | undefined;
+
+  const healPenalty = (enemy as any).healPenalty || 0;
+  const shieldPenalty = (enemy as any).shieldPenalty || 0;
 
   switch (intent.type) {
     case 'attack':
@@ -216,7 +316,9 @@ export function executeEnemyIntent(
       break;
     }
     case 'repair':
-      logs.push(createLog('enemy', 'heal', `${enemy.name} 进行维修，恢复 ${intent.value} HP`, intent.value, 1));
+      const baseHeal = intent.value;
+      healAmount = Math.floor(baseHeal * (1 - healPenalty));
+      logs.push(createLog('enemy', 'heal', `${enemy.name} 进行维修，恢复 ${healAmount} HP`, healAmount, 1));
       break;
   }
 
@@ -244,10 +346,15 @@ export function executeEnemyIntent(
   }
 
   const newPlayerHp = Math.max(0, player.hp - shieldResult.damage);
-  const newPlayerShield = shieldResult.remainingShield;
+  let newPlayerShield = shieldResult.remainingShield;
 
   if (shieldResult.damage > 0) {
     logs.push(createLog('player', 'damage', `受到 ${shieldResult.damage} 点伤害`, shieldResult.damage, 1));
+  }
+
+  if (specialEffect === 'heal_shield') {
+    const baseShieldAmount = Math.floor(enemy.maxShield * 0.3);
+    shieldAmount = Math.floor(baseShieldAmount * (1 - shieldPenalty));
   }
 
   return {
@@ -257,6 +364,8 @@ export function executeEnemyIntent(
     newPlayerHp,
     newPlayerShield,
     effect: specialEffect,
+    healAmount,
+    shieldAmount,
   };
 }
 
@@ -264,7 +373,8 @@ export function executePlayerActions(
   dice: Die[],
   player: Ship,
   enemy: Enemy,
-  config: GameConfig
+  config: GameConfig,
+  targetPartId: string | null = null
 ): {
   logs: BattleLogEntry[];
   newPlayer: Ship;
@@ -274,6 +384,8 @@ export function executePlayerActions(
   totalShieldGained: number;
   damagedCabins: CabinType[];
   energyUsed: number;
+  damagedParts: PartDamageResult[];
+  scannedParts: boolean;
 } {
   const logs: BattleLogEntry[] = [];
   let newPlayer = { ...player };
@@ -282,18 +394,15 @@ export function executePlayerActions(
   let totalHealDone = 0;
   let totalShieldGained = 0;
   const damagedCabins: CabinType[] = [];
+  const damagedParts: PartDamageResult[] = [];
   let playerEvasionBonus = 0;
   let enemyEvasionReduction = 0;
+  let scannedParts = false;
 
   const totalDicePoints = dice.reduce((sum, d) => sum + d.value, 0);
   const energyCost = Math.floor(totalDicePoints * config.energyCostPerPoint);
   const actualEnergyCost = Math.min(newPlayer.energy, energyCost);
-  const energyBefore = newPlayer.energy;
   newPlayer.energy = Math.max(0, newPlayer.energy - actualEnergyCost);
-
-  // #region debug-point H1:energy-cost
-  fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"battle-mechanics-bugs",runId:"pre-fix",hypothesisId:"H1",location:"battle.ts:282",msg:"[DEBUG] Energy cost calculation",data:{totalDicePoints,energyCostPerPoint:config.energyCostPerPoint,energyCost,actualEnergyCost,energyBefore,energyAfter:newPlayer.energy},ts:Date.now()})}).catch(()=>{});
-  // #endregion
 
   if (actualEnergyCost > 0) {
     logs.push(createLog('player', 'effect', `消耗 ${actualEnergyCost} 能量`, actualEnergyCost, 1));
@@ -338,42 +447,140 @@ export function executePlayerActions(
           const guaranteedCrit = sixCount >= 2;
           const totalCritRate = Math.min(0.9, player.critRate + bonusCritRate);
 
-          // #region debug-point H2:six-crit-calc
-          fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"battle-mechanics-bugs",runId:"pre-fix",hypothesisId:"H2",location:"battle.ts:324",msg:"[DEBUG] Six-dice crit rate calculation",data:{weaponDice:weaponDice.map(d=>({id:d.id,value:d.value})),sixCount,bonusCritRate,baseCritRate:player.critRate,totalCritRate,critBonusRate:config.critBonusRate},ts:Date.now()})}).catch(()=>{});
-          // #endregion
+          const isCrit = guaranteedCrit || Math.random() < totalCritRate;
+          let adjustedDamage = effect.value;
+          if (isCrit) {
+            adjustedDamage *= config.critMultiplier;
+            adjustedDamage = Math.floor(adjustedDamage);
+          }
 
-          const damageResult = calculateDamage(
-            effect.value,
-            totalCritRate,
-            Math.max(0, newEnemy.evasion - enemyEvasionReduction),
-            newEnemy.defense,
-            config,
-            guaranteedCrit
-          );
+          adjustedDamage *= (1 - Math.max(0, newEnemy.evasion - enemyEvasionReduction));
+          adjustedDamage *= (1 - newEnemy.defense);
+          adjustedDamage = Math.max(1, Math.floor(adjustedDamage));
 
-          if (damageResult.isMiss) {
-            logs.push(createLog('enemy', 'miss', '敌方闪避了攻击！', undefined, 1));
+          if (targetPartId && newEnemy.parts.length > 0) {
+            const targetPart = newEnemy.parts.find(p => p.id === targetPartId && !p.destroyed);
+            if (targetPart) {
+              const partDamageResult = calculatePartDamage(
+                adjustedDamage,
+                targetPart,
+                config,
+                isCrit
+              );
+
+              const newPartHp = Math.max(0, targetPart.hp - partDamageResult.damage);
+              const partDestroyed = newPartHp <= 0;
+
+              newEnemy.parts = newEnemy.parts.map(p => 
+                p.id === targetPart.id 
+                  ? { ...p, hp: newPartHp, destroyed: partDestroyed }
+                  : p
+              );
+
+              damagedParts.push({ ...partDamageResult, wasDestroyed: partDestroyed });
+
+              logs.push(createLog('enemy', 'damage', 
+                `攻击 ${targetPart.name}，造成 ${partDamageResult.damage} 点伤害${partDamageResult.armorAbsorbed > 0 ? `（护甲吸收${partDamageResult.armorAbsorbed}）` : ''}`,
+                partDamageResult.damage, 1
+              ));
+
+              if (partDamageResult.exposedBonus) {
+                logs.push(createLog('system', 'effect', `暴露部位伤害加成！`, undefined, 1));
+              }
+              if (partDamageResult.weakPointBonus) {
+                logs.push(createLog('system', 'effect', `薄弱部位暴击额外伤害！`, undefined, 1));
+              }
+              if (partDestroyed) {
+                logs.push(createLog('system', 'effect', `${targetPart.name} 已被摧毁！${targetPart.effectDescription}`, undefined, 1));
+              }
+
+              const overflowDamage = Math.max(0, partDamageResult.damage - targetPart.hp);
+              const hullDamage = Math.floor(adjustedDamage * 0.5) + overflowDamage;
+
+              if (newEnemy.shield > 0) {
+                const shieldAbsorption = Math.min(
+                  hullDamage * config.shieldAbsorptionRate,
+                  newEnemy.shield
+                );
+                newEnemy.shield = Math.max(0, newEnemy.shield - shieldAbsorption);
+                const hullFinal = Math.max(0, hullDamage - shieldAbsorption);
+                newEnemy.hp = Math.max(0, newEnemy.hp - hullFinal);
+                totalDamageDealt += hullFinal;
+                if (shieldAbsorption > 0) {
+                  logs.push(createLog('enemy', 'shield', `敌方护盾吸收 ${Math.floor(shieldAbsorption)} 伤害`, Math.floor(shieldAbsorption), 1));
+                }
+                if (hullFinal > 0) {
+                  logs.push(createLog('enemy', 'damage', `船体连带伤害 ${hullFinal} 点`, hullFinal, 1));
+                }
+              } else {
+                newEnemy.hp = Math.max(0, newEnemy.hp - hullDamage);
+                totalDamageDealt += hullDamage;
+                if (hullDamage > 0) {
+                  logs.push(createLog('enemy', 'damage', `船体连带伤害 ${hullDamage} 点`, hullDamage, 1));
+                }
+              }
+            } else {
+              const damageResult = calculateDamage(
+                effect.value,
+                totalCritRate,
+                Math.max(0, newEnemy.evasion - enemyEvasionReduction),
+                newEnemy.defense,
+                config,
+                guaranteedCrit
+              );
+
+              if (damageResult.isMiss) {
+                logs.push(createLog('enemy', 'miss', '敌方闪避了攻击！', undefined, 1));
+              } else {
+                const shieldAbsorption = applyShieldAbsorption(damageResult, newEnemy.shield, config);
+                
+                if (shieldAbsorption.shieldAbsorbed > 0) {
+                  logs.push(createLog('enemy', 'shield', `敌方护盾吸收 ${shieldAbsorption.shieldAbsorbed} 伤害`, shieldAbsorption.shieldAbsorbed, 1));
+                }
+                
+                if (damageResult.isCrit) {
+                  logs.push(createLog('player', 'crit', '暴击！', damageResult.damage, 1));
+                }
+
+                newEnemy.shield = shieldAbsorption.remainingShield;
+                newEnemy.hp = Math.max(0, newEnemy.hp - shieldAbsorption.damage);
+                totalDamageDealt += shieldAbsorption.damage;
+                
+                if (shieldAbsorption.damage > 0) {
+                  logs.push(createLog('enemy', 'damage', `敌方受到 ${shieldAbsorption.damage} 点伤害`, shieldAbsorption.damage, 1));
+                }
+              }
+            }
           } else {
-            const shieldAbsorption = applyShieldAbsorption(damageResult, newEnemy.shield, config);
-            
-            if (shieldAbsorption.shieldAbsorbed > 0) {
-              logs.push(createLog('enemy', 'shield', `敌方护盾吸收 ${shieldAbsorption.shieldAbsorbed} 伤害`, shieldAbsorption.shieldAbsorbed, 1));
-            }
-            
-            if (damageResult.isCrit) {
-              logs.push(createLog('player', 'crit', '暴击！', damageResult.damage, 1));
-            }
+            const damageResult = calculateDamage(
+              effect.value,
+              totalCritRate,
+              Math.max(0, newEnemy.evasion - enemyEvasionReduction),
+              newEnemy.defense,
+              config,
+              guaranteedCrit
+            );
 
-            // #region debug-point H2:crit-result
-            fetch("http://127.0.0.1:7777/event",{method:"POST",body:JSON.stringify({sessionId:"battle-mechanics-bugs",runId:"pre-fix",hypothesisId:"H2",location:"battle.ts:346",msg:"[DEBUG] Crit result",data:{damage:damageResult.damage,isCrit:damageResult.isCrit,isMiss:damageResult.isMiss,shieldAbsorbed:0},ts:Date.now()})}).catch(()=>{});
-            // #endregion
+            if (damageResult.isMiss) {
+              logs.push(createLog('enemy', 'miss', '敌方闪避了攻击！', undefined, 1));
+            } else {
+              const shieldAbsorption = applyShieldAbsorption(damageResult, newEnemy.shield, config);
+              
+              if (shieldAbsorption.shieldAbsorbed > 0) {
+                logs.push(createLog('enemy', 'shield', `敌方护盾吸收 ${shieldAbsorption.shieldAbsorbed} 伤害`, shieldAbsorption.shieldAbsorbed, 1));
+              }
+              
+              if (damageResult.isCrit) {
+                logs.push(createLog('player', 'crit', '暴击！', damageResult.damage, 1));
+              }
 
-            newEnemy.shield = shieldAbsorption.remainingShield;
-            newEnemy.hp = Math.max(0, newEnemy.hp - shieldAbsorption.damage);
-            totalDamageDealt += shieldAbsorption.damage;
-            
-            if (shieldAbsorption.damage > 0) {
-              logs.push(createLog('enemy', 'damage', `敌方受到 ${shieldAbsorption.damage} 点伤害`, shieldAbsorption.damage, 1));
+              newEnemy.shield = shieldAbsorption.remainingShield;
+              newEnemy.hp = Math.max(0, newEnemy.hp - shieldAbsorption.damage);
+              totalDamageDealt += shieldAbsorption.damage;
+              
+              if (shieldAbsorption.damage > 0) {
+                logs.push(createLog('enemy', 'damage', `敌方受到 ${shieldAbsorption.damage} 点伤害`, shieldAbsorption.damage, 1));
+              }
             }
           }
         }
@@ -411,6 +618,23 @@ export function executePlayerActions(
       case 'scanner': {
         if (!isOverheated) {
           enemyEvasionReduction += effect.value;
+          if (allocation.totalPoints >= 5) {
+            scannedParts = true;
+            newEnemy.parts = newEnemy.parts.map(part => ({
+              ...part,
+              isScanned: true,
+            }));
+            logs.push(createLog('system', 'effect', '扫描舱深度扫描完成！已标记所有敌舰部位信息', undefined, 1));
+          } else if (newEnemy.parts.length > 0) {
+            const unscannedParts = newEnemy.parts.filter(p => !p.isScanned);
+            if (unscannedParts.length > 0) {
+              const scannedPart = unscannedParts[Math.floor(Math.random() * unscannedParts.length)];
+              newEnemy.parts = newEnemy.parts.map(p => 
+                p.id === scannedPart.id ? { ...p, isScanned: true } : p
+              );
+              logs.push(createLog('system', 'effect', `扫描到 ${scannedPart.name} 的详细信息`, undefined, 1));
+            }
+          }
         }
         break;
       }
@@ -436,6 +660,8 @@ export function executePlayerActions(
     currentCooldown: Math.max(0, a.currentCooldown - 1),
   }));
 
+  newEnemy = applyPartEffects(newEnemy, config);
+
   return {
     logs,
     newPlayer,
@@ -445,6 +671,8 @@ export function executePlayerActions(
     totalShieldGained,
     damagedCabins,
     energyUsed: actualEnergyCost,
+    damagedParts,
+    scannedParts,
   };
 }
 
@@ -472,13 +700,14 @@ export function checkBattleEnd(player: Ship, enemy: Enemy): 'ongoing' | 'victory
   return 'ongoing';
 }
 
-export function calculateReward(result: 'victory' | 'defeat' | 'fled', turns: number, difficulty: number): number {
+export function calculateReward(result: 'victory' | 'defeat' | 'fled', turns: number, difficulty: number, partsDestroyed: number = 0): number {
   if (result === 'defeat') return 0;
   if (result === 'fled') return 0;
   
   const baseReward = 10 * difficulty;
   const turnBonus = Math.max(0, 10 - turns) * difficulty;
-  return baseReward + turnBonus;
+  const partBonus = partsDestroyed * 5 * difficulty;
+  return baseReward + turnBonus + partBonus;
 }
 
 export function getIntentIcon(intent: EnemyIntent): string {
@@ -494,4 +723,26 @@ export function getIntentColor(intent: EnemyIntent): string {
     case 'repair': return 'text-neon-green';
     default: return 'text-gray-400';
   }
+}
+
+export function getPartIcon(partType: string): string {
+  const icons: Record<string, string> = {
+    weapon_array: '⚔️',
+    shield_generator: '🛡️',
+    thruster: '🚀',
+    repair_core: '🔧',
+    command_bridge: '🎯',
+  };
+  return icons[partType] || '❓';
+}
+
+export function getPartName(partType: string): string {
+  const names: Record<string, string> = {
+    weapon_array: '武器阵列',
+    shield_generator: '护盾发生器',
+    thruster: '推进器',
+    repair_core: '维修核心',
+    command_bridge: '指挥桥',
+  };
+  return names[partType] || '未知部位';
 }

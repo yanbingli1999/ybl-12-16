@@ -4,6 +4,7 @@ import { DiceArea } from '../components/Dice/DiceArea';
 import { CabinArea } from '../components/Cabin/CabinArea';
 import { ShipStatus } from '../components/Ship/ShipStatus';
 import { EnemyIntent } from '../components/Ship/EnemyIntent';
+import { EnemyParts } from '../components/Ship/EnemyParts';
 import { BattleLog } from '../components/BattleLog/BattleLog';
 import { FloatingText } from '../components/BattleLog/FloatingText';
 import { Modal } from '../components/UI/Modal';
@@ -21,6 +22,7 @@ export const BattlePage: React.FC = () => {
     fleeBattle, 
     resetBattle,
     setDifficulty,
+    setTargetPart,
     isReplaying,
   } = useGameStore();
   const { dice } = useDiceStore();
@@ -189,7 +191,17 @@ export const BattlePage: React.FC = () => {
           </div>
         </div>
         
-        <ShipStatus ship={battleState.enemy} isPlayer={false} />
+        <div className="flex flex-col gap-4">
+          <ShipStatus ship={battleState.enemy} isPlayer={false} />
+          {battleState.enemy.parts && battleState.enemy.parts.length > 0 && (
+            <EnemyParts
+              parts={battleState.enemy.parts}
+              selectedPartId={battleState.targetPartId}
+              onSelectPart={setTargetPart}
+              disabled={!isPlayerPhase || isReplaying}
+            />
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -245,6 +257,11 @@ export const BattlePage: React.FC = () => {
               <div className="text-3xl font-display font-bold text-neon-yellow">
                 +{battleState.rewardPoints} 💰
               </div>
+              {battleState.enemy.parts && battleState.enemy.parts.filter(p => p.destroyed).length > 0 && (
+                <div className="mt-2 text-xs text-neon-green">
+                  摧毁部位: {battleState.enemy.parts.filter(p => p.destroyed).length} 个
+                </div>
+              )}
             </div>
           )}
 

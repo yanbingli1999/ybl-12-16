@@ -12,4 +12,12 @@ export const defaultConfig: GameConfig = {
   maxRerolls: 2,
   diceCount: 5,
   enemyDamageVariance: 0.2,
+  partArmorDamageReduction: 0.3,
+  weaponArrayAttackReduction: 0.4,
+  thrusterEvasionReduction: 0.6,
+  shieldGeneratorShieldPenalty: 0.5,
+  repairCoreHealReduction: 0.5,
+  commandBridgeDisruptChance: 0.6,
+  exposedPartDamageBonus: 0.3,
+  weakPointCritBonus: 0.3,
 };

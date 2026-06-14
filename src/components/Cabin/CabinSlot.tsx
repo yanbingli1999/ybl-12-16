@@ -1,5 +1,5 @@
 import React from 'react';
-import { Flame, AlertTriangle } from 'lucide-react';
+import { Flame, AlertTriangle, Crosshair } from 'lucide-react';
 import type { Cabin, Die, CabinType } from '../../types';
 import { useConfigStore } from '../../store/useConfigStore';
 
@@ -10,6 +10,7 @@ interface CabinSlotProps {
   onDrop: (cabinType: CabinType, dieId: string) => void;
   onRemoveDie: (dieId: string) => void;
   disabled?: boolean;
+  targetPartName?: string | null;
 }
 
 const cabinColors: Record<CabinType, { bg: string; border: string; text: string; icon: string }> = {
@@ -27,6 +28,7 @@ export const CabinSlot: React.FC<CabinSlotProps> = ({
   onDrop,
   onRemoveDie,
   disabled,
+  targetPartName,
 }) => {
   const colors = cabinColors[cabin.type];
   const { config } = useConfigStore();
@@ -117,6 +119,24 @@ export const CabinSlot: React.FC<CabinSlotProps> = ({
               (超过阈值 {config.overheatThreshold})
             </span>
           )}
+        </div>
+      )}
+
+      {cabin.type === 'weapon' && targetPartName && (
+        <div className="mt-2 pt-2 border-t border-space-600">
+          <div className="flex items-center gap-1 text-xs text-neon-yellow">
+            <Crosshair className="w-3 h-3" />
+            <span>攻击目标: {targetPartName}</span>
+          </div>
+        </div>
+      )}
+
+      {cabin.type === 'weapon' && !targetPartName && (
+        <div className="mt-2 pt-2 border-t border-space-600">
+          <div className="flex items-center gap-1 text-xs text-gray-500">
+            <Crosshair className="w-3 h-3" />
+            <span>攻击舰体 (可在右侧选择敌舰部位)</span>
+          </div>
         </div>
       )}
 
