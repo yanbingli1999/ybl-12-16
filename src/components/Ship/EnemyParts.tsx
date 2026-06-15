@@ -1,5 +1,5 @@
 import React from 'react';
-import { Lock, Eye, Shield, AlertTriangle, Check, Crosshair } from 'lucide-react';
+import { Lock, Eye, Shield, AlertTriangle, Check, Crosshair, HelpCircle } from 'lucide-react';
 import type { EnemyPart } from '../../types';
 
 interface EnemyPartsProps {
@@ -26,21 +26,43 @@ export const EnemyParts: React.FC<EnemyPartsProps> = ({
     return 'bg-neon-red';
   };
 
+  const isPartSelectable = (part: EnemyPart): boolean => {
+    if (disabled || part.destroyed) return false;
+    if (part.isExposed || part.isScanned) return true;
+    return false;
+  };
+
   const getPartBorderClass = (part: EnemyPart) => {
+    const selectable = isPartSelectable(part);
+    
     if (part.destroyed) return 'border-gray-600 bg-gray-800/50 opacity-60';
     if (selectedPartId === part.id) return 'border-neon-yellow bg-neon-yellow/10 ring-2 ring-neon-yellow/50';
+    if (!part.isScanned && !part.isExposed) return 'border-space-600 bg-space-800/50';
     if (part.isScanned && part.isWeakPoint) return 'border-neon-purple/60 bg-neon-purple/5';
-    if (part.isExposed) return 'border-neon-orange/60';
-    return 'border-space-600 hover:border-space-500';
+    if (part.isExposed && part.isScanned) return 'border-neon-orange/60 bg-neon-orange/5';
+    if (part.isExposed) return 'border-neon-orange/40 bg-neon-orange/5';
+    return selectable 
+      ? 'border-space-500 hover:border-space-400 bg-space-800/30'
+      : 'border-space-600 bg-space-800/20';
   };
 
   const handlePartClick = (part: EnemyPart) => {
-    if (disabled || part.destroyed) return;
+    if (!isPartSelectable(part)) return;
     if (selectedPartId === part.id) {
       onSelectPart(null);
     } else {
       onSelectPart(part.id);
     }
+  };
+
+  const getPartDisplayName = (part: EnemyPart): string => {
+    if (part.isScanned || part.isExposed) return part.name;
+    return '未知部位';
+  };
+
+  const getPartDisplayIcon = (part: EnemyPart): string => {
+    if (part.isScanned || part.isExposed) return part.icon;
+    return '❓';
   };
 
   return (
@@ -64,7 +86,8 @@ export const EnemyParts: React.FC<EnemyPartsProps> = ({
       <div className="grid grid-cols-1 gap-2">
         {parts.map(part => {
           const hpPercent = (part.hp / part.maxHp) * 100;
-          const canTarget = !disabled && !part.destroyed;
+          const canTarget = isPartSelectable(part);
+          const isHidden = !part.isScanned && !part.isExposed;
 
           return (
             <div
@@ -77,51 +100,57 @@ export const EnemyParts: React.FC<EnemyPartsProps> = ({
               `}
             >
               <div className="flex items-center gap-2 mb-2">
-                <span className="text-xl">{part.icon}</span>
+                <span className="text-xl">{getPartDisplayIcon(part)}</span>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1">
-                    <span className={`font-display font-bold text-sm ${part.destroyed ? 'text-gray-500 line-through' : 'text-white'}`}>
-                      {part.name}
+                    <span className={`font-display font-bold text-sm ${part.destroyed ? 'text-gray-500 line-through' : isHidden ? 'text-gray-500' : 'text-white'}`}>
+                      {getPartDisplayName(part)}
                     </span>
                     {part.destroyed && (
                       <Check className="w-3 h-3 text-gray-500" />
                     )}
-                    {part.isScanned && part.isWeakPoint && !part.destroyed && (
-                      <span className="flex items-center text-xs text-neon-purple" title="薄弱部位">
+                    {isHidden && (
+                      <HelpCircle className="w-3 h-3 text-gray-600" />
+                    )}
+                    {!isHidden && part.isScanned && part.isWeakPoint && !part.destroyed && (
+                      <span className="flex items-center text-xs text-neon-purple" title="薄弱部位 - 暴击额外伤害">
                         <AlertTriangle className="w-3 h-3" />
                       </span>
                     )}
-                    {part.isExposed && !part.destroyed && (
-                      <span className="flex items-center text-xs text-neon-orange" title="暴露部位">
+                    {!isHidden && part.isExposed && !part.destroyed && (
+                      <span className="flex items-center text-xs text-neon-orange" title="暴露部位 - 伤害加成">
                         <Eye className="w-3 h-3" />
                       </span>
                     )}
-                    {!part.isScanned && !part.destroyed && (
-                      <span className="flex items-center text-xs text-gray-500" title="需要扫描">
+                    {!part.isScanned && !part.isExposed && !part.destroyed && (
+                      <span className="flex items-center text-xs text-gray-600" title="需要扫描">
                         <Lock className="w-3 h-3" />
                       </span>
                     )}
                   </div>
-                  {part.isScanned && (
+                  {part.isScanned && !part.destroyed && (
                     <p className="text-xs text-gray-500 truncate">{part.description}</p>
+                  )}
+                  {isHidden && !part.destroyed && (
+                    <p className="text-xs text-gray-600">扫描后查看详情</p>
                   )}
                 </div>
               </div>
 
               <div className="space-y-1">
                 <div className="flex items-center justify-between text-xs">
-                  <span className="text-gray-400 flex items-center gap-1">
+                  <span className="text-gray-500 flex items-center gap-1">
                     <Shield className="w-3 h-3" />
-                    {part.isScanned ? `护甲 ${(part.armor * 100).toFixed(0)}%` : '未知'}
+                    {part.isScanned ? `护甲 ${(part.armor * 100).toFixed(0)}%` : part.isExposed ? '低护甲' : '未知'}
                   </span>
-                  <span className={`font-display ${part.destroyed ? 'text-gray-500' : 'text-white'}`}>
-                    {part.destroyed ? '已摧毁' : `${part.hp}/${part.maxHp}`}
+                  <span className={`font-display ${part.destroyed ? 'text-gray-500' : isHidden ? 'text-gray-600' : 'text-white'}`}>
+                    {part.destroyed ? '已摧毁' : isHidden ? '?/? HP' : `${part.hp}/${part.maxHp}`}
                   </span>
                 </div>
                 <div className="stat-bar">
                   <div
-                    className={`stat-bar-fill ${part.destroyed ? 'bg-gray-600' : getPartHpColor(part)}`}
-                    style={{ width: `${part.destroyed ? 100 : hpPercent}%` }}
+                    className={`stat-bar-fill ${part.destroyed ? 'bg-gray-600' : isHidden ? 'bg-gray-700' : getPartHpColor(part)}`}
+                    style={{ width: `${part.destroyed ? 100 : isHidden ? 100 : hpPercent}%` }}
                   />
                 </div>
               </div>
@@ -135,7 +164,7 @@ export const EnemyParts: React.FC<EnemyPartsProps> = ({
               )}
 
               {!part.destroyed && part.isScanned && part.effectDescription && (
-                <div className="mt-2 pt-2 border-t border-gray-700">
+                <div className="mt-2 pt-2 border-t border-space-600">
                   <p className="text-xs text-gray-500 italic">
                     破坏后：{part.effectDescription}
                   </p>
@@ -147,6 +176,10 @@ export const EnemyParts: React.FC<EnemyPartsProps> = ({
                   目标
                 </div>
               )}
+
+              {!canTarget && !part.destroyed && !isHidden && (
+                <div className="absolute inset-0 bg-space-900/30 rounded-lg pointer-events-none" />
+              )}
             </div>
           );
         })}
@@ -156,15 +189,15 @@ export const EnemyParts: React.FC<EnemyPartsProps> = ({
         <div className="flex flex-wrap gap-3 text-xs text-gray-500">
           <div className="flex items-center gap-1">
             <Eye className="w-3 h-3 text-neon-orange" />
-            <span>暴露部位 +伤害</span>
+            <span>暴露 +伤害</span>
           </div>
           <div className="flex items-center gap-1">
             <AlertTriangle className="w-3 h-3 text-neon-purple" />
-            <span>薄弱部位 +暴击</span>
+            <span>薄弱 +暴击</span>
           </div>
           <div className="flex items-center gap-1">
             <Lock className="w-3 h-3 text-gray-500" />
-            <span>需扫描</span>
+            <span>需扫描锁定</span>
           </div>
         </div>
       </div>

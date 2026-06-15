@@ -458,8 +458,17 @@ export function executePlayerActions(
           adjustedDamage *= (1 - newEnemy.defense);
           adjustedDamage = Math.max(1, Math.floor(adjustedDamage));
 
-          if (targetPartId && newEnemy.parts.length > 0) {
-            const targetPart = newEnemy.parts.find(p => p.id === targetPartId && !p.destroyed);
+          let validTargetPartId = targetPartId;
+          if (validTargetPartId && newEnemy.parts.length > 0) {
+            const targetPart = newEnemy.parts.find(p => p.id === validTargetPartId);
+            if (targetPart && !targetPart.isExposed && !targetPart.isScanned) {
+              validTargetPartId = null;
+              logs.push(createLog('system', 'effect', '目标部位未被扫描，无法精确锁定，攻击转为舰体', undefined, 1));
+            }
+          }
+
+          if (validTargetPartId && newEnemy.parts.length > 0) {
+            const targetPart = newEnemy.parts.find(p => p.id === validTargetPartId && !p.destroyed);
             if (targetPart) {
               const partDamageResult = calculatePartDamage(
                 adjustedDamage,

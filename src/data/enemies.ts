@@ -93,11 +93,14 @@ function createEnemyParts(
       { type: 'weapon_array', hpRatio: 0.3, armor: 0.2 },
       { type: 'shield_generator', hpRatio: 0.25, armor: 0.3 },
       { type: 'thruster', hpRatio: 0.2, armor: 0.1 },
+      { type: 'repair_core', hpRatio: 0.2, armor: 0.25 },
       { type: 'command_bridge', hpRatio: 0.35, armor: 0.4 },
     ],
     raider: [
       { type: 'weapon_array', hpRatio: 0.25, armor: 0.1 },
+      { type: 'shield_generator', hpRatio: 0.15, armor: 0.15 },
       { type: 'thruster', hpRatio: 0.3, armor: 0.1 },
+      { type: 'repair_core', hpRatio: 0.15, armor: 0.15 },
       { type: 'command_bridge', hpRatio: 0.25, armor: 0.2 },
     ],
     boss: [
